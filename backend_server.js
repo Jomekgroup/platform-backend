@@ -1,3 +1,9 @@
+/**
+ * The People's Platform - Backend Server Code
+ * database: Supabase (PostgreSQL)
+ * host: Render
+ */
+
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
@@ -9,22 +15,21 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
-app.use(express.json({ limit: '50mb' })); 
+app.use(cors()); // Allow Frontend to connect
+app.use(express.json({ limit: '50mb' })); // Increase limit for large images
 
-// PostgreSQL Connection Pool
+// PostgreSQL Connection Pool (Supabase)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // <--- THIS IS REQUIRED FOR SUPABASE
+    rejectUnauthorized: false // REQUIRED for Supabase connection
   }
 });
 
 // --- Database Initialization ---
-// (We keep this to ensure tables exist, though we already ran SQL)
 const initDb = async () => {
   try {
-    // Articles Table
+    // 1. Articles Table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS articles (
         id SERIAL PRIMARY KEY,
@@ -41,7 +46,7 @@ const initDb = async () => {
       );
     `);
 
-    // Ads Table
+    // 2. Ads Table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS ads (
         id SERIAL PRIMARY KEY,
@@ -59,7 +64,7 @@ const initDb = async () => {
       );
     `);
 
-    // Comments Table
+    // 3. Comments Table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS comments (
         id SERIAL PRIMARY KEY,
@@ -79,9 +84,14 @@ const initDb = async () => {
 
 initDb();
 
-// --- Routes ---
+// --- ROOT ROUTE (The Welcome Page) ---
+app.get('/', (req, res) => {
+  res.send('The Platform API is running successfully! 🚀');
+});
 
-// 1. Get All Published Articles
+// --- API ROUTES ---
+
+// 1. Get All Published Articles (Newest First)
 app.get('/api/articles', async (req, res) => {
   try {
     const result = await pool.query(
@@ -93,7 +103,7 @@ app.get('/api/articles', async (req, res) => {
   }
 });
 
-// 2. Submit New Article
+// 2. Submit New Article (Citizen Journalism)
 app.post('/api/articles', async (req, res) => {
   const { title, category, author, image, excerpt, content } = req.body;
   try {
@@ -111,7 +121,7 @@ app.post('/api/articles', async (req, res) => {
 // 3. Admin: Get Pending Articles
 app.get('/api/admin/pending-articles', async (req, res) => {
   try {
-    const result = await pool.query("SELECT * FROM articles WHERE status = 'pending'");
+    const result = await pool.query("SELECT * FROM articles WHERE status = 'pending' ORDER BY date DESC");
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -125,7 +135,7 @@ app.patch('/api/admin/articles/:id/approve', async (req, res) => {
   try {
     const result = await pool.query(
       `UPDATE articles 
-       SET status = 'published', is_breaking = $1 
+       SET status = 'published', is_breaking = $1, date = NOW() 
        WHERE id = $2 RETURNING *`,
       [isBreaking || false, id]
     );
@@ -158,7 +168,7 @@ app.post('/api/ads', async (req, res) => {
 app.get('/api/ads/active', async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM ads WHERE status = 'active'");
-    // Map DB columns to JSON keys
+    // Map DB columns (snake_case) to JSON keys (camelCase)
     const mappedAds = result.rows.map(ad => ({
       id: ad.id,
       clientName: ad.client_name,
@@ -188,7 +198,24 @@ app.patch('/api/admin/ads/:id/approve', async (req, res) => {
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'Ad not found' });
-    res.json(result.rows[0]);
+    
+    // Return mapped version immediately so UI updates cleanly
+    const ad = result.rows[0];
+    const mappedAd = {
+      id: ad.id,
+      clientName: ad.client_name,
+      email: ad.email,
+      plan: ad.plan,
+      amount: ad.amount,
+      status: ad.status,
+      dateSubmitted: ad.date_submitted,
+      receiptImage: ad.receipt_image,
+      adImage: ad.ad_image,
+      adContent: ad.ad_content,
+      adUrl: ad.ad_url,
+      adHeadline: ad.ad_headline
+    };
+    res.json(mappedAd);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
