@@ -26,7 +26,7 @@ const pool = new Pool({
   }
 });
 
-// --- Database Initialization & Migration ---
+// --- Database Initialization ---
 const initDb = async () => {
   try {
     // 1. Articles Table
@@ -76,6 +76,12 @@ const initDb = async () => {
         date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    console.log("PostgreSQL Tables initialized.");
+  } catch (err) {
+    console.error("Error creating tables:", err);
+  }
+};
 
     // --- MIGRATIONS (Fixes for existing data) ---
     
