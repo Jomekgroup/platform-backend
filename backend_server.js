@@ -26,7 +26,7 @@ const pool = new Pool({
   }
 });
 
-// --- Database Initialization ---
+// --- Database Initialization & Migration ---
 const initDb = async () => {
   try {
     // 1. Articles Table
@@ -46,13 +46,6 @@ const initDb = async () => {
         sub_headline TEXT
       );
     `);
-
-    // MIGRATION: Add sub_headline column if it doesn't exist (for existing databases)
-    try {
-        await pool.query("ALTER TABLE articles ADD COLUMN IF NOT EXISTS sub_headline TEXT");
-    } catch (e) {
-        // Ignore error if column exists
-    }
 
     // 2. Ads Table
     await pool.query(`
@@ -84,7 +77,18 @@ const initDb = async () => {
       );
     `);
 
-    console.log("PostgreSQL Tables initialized.");
+    // --- MIGRATIONS (Fixes for existing data) ---
+    
+    // Fix 1: Add sub_headline if missing
+    try {
+        await pool.query("ALTER TABLE articles ADD COLUMN IF NOT EXISTS sub_headline TEXT");
+    } catch (e) { /* ignore */ }
+
+    // Fix 2: MARK OLD NEWS AS PUBLISHED (This fixes the missing news issue)
+    // This forces any article without a status to be 'published' so it shows on the homepage
+    await pool.query("UPDATE articles SET status = 'published' WHERE status IS NULL");
+
+    console.log("PostgreSQL Tables initialized and Legacy Data Fixed.");
   } catch (err) {
     console.error("Error creating tables:", err);
   }
@@ -102,8 +106,9 @@ app.get('/', (req, res) => {
 // 1. Get All Published Articles (Newest First)
 app.get('/api/articles', async (req, res) => {
   try {
+    // We now explicitly check for 'published' OR null (double safety)
     const result = await pool.query(
-      "SELECT * FROM articles WHERE status = 'published' ORDER BY date DESC"
+      "SELECT * FROM articles WHERE status = 'published' OR status IS NULL ORDER BY date DESC"
     );
     res.json(result.rows);
   } catch (err) {
@@ -111,12 +116,9 @@ app.get('/api/articles', async (req, res) => {
   }
 });
 
-// 2. Submit New Article (Updates status logic)
+// 2. Submit New Article
 app.post('/api/articles', async (req, res) => {
-  // We now accept 'status' and 'subHeadline' from the body
   const { title, subHeadline, category, author, image, excerpt, content, status } = req.body;
-  
-  // Default status is 'pending' unless explicitly set (e.g., by admin)
   const finalStatus = status || 'pending';
 
   try {
@@ -162,7 +164,7 @@ app.patch('/api/admin/articles/:id/approve', async (req, res) => {
   }
 });
 
-// 5. Admin: Update Article (Includes sub_headline)
+// 5. Admin: Update Article
 app.put('/api/articles/:id', async (req, res) => {
   const { id } = req.params;
   const { title, subHeadline, category, author, image, content, isBreaking } = req.body;
@@ -210,7 +212,6 @@ app.post('/api/ads', async (req, res) => {
 app.get('/api/ads/active', async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM ads WHERE status = 'active'");
-    // Map DB columns to Frontend
     const mappedAds = result.rows.map(ad => ({
       id: ad.id,
       clientName: ad.client_name,
@@ -242,7 +243,6 @@ app.patch('/api/admin/ads/:id/approve', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ message: 'Ad not found' });
     
     const ad = result.rows[0];
-    // Simple map for immediate return
     const mappedAd = {
       id: ad.id,
       clientName: ad.client_name,
