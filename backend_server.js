@@ -78,7 +78,7 @@ const initDb = async () => {
       );
     `);
 
-    // 4. Support Messages Table (NEW)
+    // 4. Support Messages Table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS support_messages (
         id SERIAL PRIMARY KEY,
@@ -216,7 +216,7 @@ app.post('/api/ads', async (req, res) => {
   }
 });
 
-// 8. Get Active Ads
+// 8. Get Active Ads (Public)
 app.get('/api/ads/active', async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM ads WHERE status = 'active'");
@@ -242,7 +242,7 @@ app.get('/api/ads/active', async (req, res) => {
   }
 });
 
-// 8b. Get ALL Ads (For Admin Dashboard)
+// 8b. Get ALL Ads (Admin)
 app.get('/api/admin/ads', async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM ads ORDER BY date_submitted DESC");
@@ -252,7 +252,7 @@ app.get('/api/admin/ads', async (req, res) => {
       email: ad.email,
       plan: ad.plan,
       amount: ad.amount,
-      status: ad.status, // Includes 'Pending', 'Active', 'Rejected'
+      status: ad.status, 
       dateSubmitted: ad.date_submitted,
       receiptImage: ad.receipt_image,
       adImage: ad.ad_image,
@@ -276,7 +276,18 @@ app.patch('/api/admin/ads/:id/approve', async (req, res) => {
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'Ad not found' });
-    res.json(result.rows[0]); // Return raw for simplicity or map it
+    res.json(result.rows[0]); 
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// 9b. Admin: Delete Ad (NEW - Solves the removal issue)
+app.delete('/api/ads/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await pool.query("DELETE FROM ads WHERE id = $1", [id]);
+    res.json({ message: "Ad deleted successfully" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -318,12 +329,12 @@ app.get('/api/articles/:id/comments', async (req, res) => {
   }
 });
 
-// 12. Submit Support Message (NEW)
+// 12. Submit Support Message
 app.post('/api/support', async (req, res) => {
   const { name, email, subject, message } = req.body;
   try {
     await pool.query(
-      "INSERT INTO support_messages (name, email, subject, message) VALUES ($1, $2, $3, $4)",
+      "INSERT INTOa support_messages (name, email, subject, message) VALUES ($1, $2, $3, $4)",
       [name, email, subject, message]
     );
     res.status(201).json({ message: "Support message sent" });
@@ -332,7 +343,7 @@ app.post('/api/support', async (req, res) => {
   }
 });
 
-// 13. Admin: Get Support Messages (NEW)
+// 13. Admin: Get Support Messages
 app.get('/api/admin/support', async (req, res) => {
   try {
     const result = await pool.query("SELECT * FROM support_messages ORDER BY date DESC");
