@@ -1,0 +1,7 @@
+anode_modules/
+.env
+dist/
+build/
+coverage/
+logs/
+*.log
