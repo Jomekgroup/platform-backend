@@ -4,6 +4,8 @@
   "description": "",
   "main": "backend_server.js",
   "scripts": {
+    "start": "node backend_server.js",
+    "dev": "node backend_server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

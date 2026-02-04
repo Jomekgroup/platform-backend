@@ -15,7 +15,16 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors()); // Allow Frontend to connect
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'https://*.vercel.app',
+    'https://*.netlify.app'
+  ],
+  credentials: true
+})); // Allow Frontend to connect securely
 app.use(express.json({ limit: '50mb' })); // Increase limit for large images/files
 
 // PostgreSQL Connection Pool (Supabase)
@@ -105,6 +114,11 @@ const initDb = async () => {
 
 initDb();
 
+// --- Error Handling Middleware ---
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
 // --- ROOT ROUTE ---
 app.get('/', (req, res) => {
   res.send('The Platform API is running successfully! 🚀');
@@ -113,108 +127,94 @@ app.get('/', (req, res) => {
 // --- API ROUTES ---
 
 // 1. Get All Published Articles
-app.get('/api/articles', async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT * FROM articles WHERE status = 'published' OR status IS NULL ORDER BY date DESC"
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+app.get('/api/articles', asyncHandler(async (req, res) => {
+  const result = await pool.query(
+    "SELECT * FROM articles WHERE status = 'published' OR status IS NULL ORDER BY date DESC"
+  );
+  res.json(result.rows);
+}));
 
 // 2. Submit New Article
-app.post('/api/articles', async (req, res) => {
+app.post('/api/articles', asyncHandler(async (req, res) => {
   const { title, subHeadline, category, author, image, excerpt, content, status } = req.body;
+  
+  // Input validation
+  if (!title || !category || !content) {
+    return res.status(400).json({ message: 'Title, category, and content are required' });
+  }
+  
   const finalStatus = status || 'pending';
 
-  try {
-    const result = await pool.query(
-      `INSERT INTO articles (title, sub_headline, category, author, image, excerpt, content, status) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [title, subHeadline || '', category, author || 'Citizen Reporter', image, excerpt, content, finalStatus]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
-  }
-});
+  const result = await pool.query(
+    `INSERT INTO articles (title, sub_headline, category, author, image, excerpt, content, status) 
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+    [title, subHeadline || '', category, author || 'Citizen Reporter', image, excerpt, content, finalStatus]
+  );
+  res.status(201).json(result.rows[0]);
+}));
 
 // 3. Admin: Get Pending Articles
-app.get('/api/admin/pending-articles', async (req, res) => {
-  try {
-    const result = await pool.query("SELECT * FROM articles WHERE status = 'pending' ORDER BY date DESC");
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+app.get('/api/admin/pending-articles', asyncHandler(async (req, res) => {
+  const result = await pool.query("SELECT * FROM articles WHERE status = 'pending' ORDER BY date DESC");
+  res.json(result.rows);
+}));
 
 // 4. Admin: Approve Article
-app.patch('/api/admin/articles/:id/approve', async (req, res) => {
+app.patch('/api/admin/articles/:id/approve', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { isBreaking } = req.body;
-  try {
-    const result = await pool.query(
-      `UPDATE articles 
-       SET status = 'published', is_breaking = $1, date = NOW() 
-       WHERE id = $2 RETURNING *`,
-      [isBreaking || false, id]
-    );
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: 'Article not found' });
-    }
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+  
+  const result = await pool.query(
+    `UPDATE articles 
+     SET status = 'published', is_breaking = $1, date = NOW() 
+     WHERE id = $2 RETURNING *`,
+    [isBreaking || false, id]
+  );
+  
+  if (result.rows.length === 0) {
+    return res.status(404).json({ message: 'Article not found' });
   }
-});
+  res.json(result.rows[0]);
+}));
 
 // 5. Admin: Update Article
-app.put('/api/articles/:id', async (req, res) => {
+app.put('/api/articles/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { title, subHeadline, category, author, image, content, isBreaking } = req.body;
-  try {
-    const result = await pool.query(
-      `UPDATE articles 
-       SET title = $1, sub_headline = $2, category = $3, author = $4, image = $5, content = $6, is_breaking = $7
-       WHERE id = $8 RETURNING *`,
-      [title, subHeadline, category, author, image, content, isBreaking, id]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ message: 'Article not found' });
-    res.json(result.rows[0]);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+  
+  const result = await pool.query(
+    `UPDATE articles 
+     SET title = $1, sub_headline = $2, category = $3, author = $4, image = $5, content = $6, is_breaking = $7
+     WHERE id = $8 RETURNING *`,
+    [title, subHeadline, category, author, image, content, isBreaking, id]
+  );
+  if (result.rows.length === 0) return res.status(404).json({ message: 'Article not found' });
+  res.json(result.rows[0]);
+}));
 
 // 6. Admin: Delete Article
-app.delete('/api/articles/:id', async (req, res) => {
+app.delete('/api/articles/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  try {
-    await pool.query("DELETE FROM articles WHERE id = $1", [id]);
-    res.json({ message: "Article deleted successfully" });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
+  await pool.query("DELETE FROM articles WHERE id = $1", [id]);
+  res.json({ message: "Article deleted successfully" });
+}));
 
 // 7. Submit Advertisement
-app.post('/api/ads', async (req, res) => {
+app.post('/api/ads', asyncHandler(async (req, res) => {
   const { clientName, email, plan, amount, receiptImage, adImage, adContent, adUrl, adHeadline, adContentFile } = req.body;
-  try {
-    const result = await pool.query(
-      `INSERT INTO ads (client_name, email, plan, amount, receipt_image, ad_image, ad_content, ad_url, ad_headline, ad_content_file)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-      [clientName, email, plan, amount, receiptImage, adImage, adContent, adUrl, adHeadline, adContentFile]
-    );
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    res.status(400).json({ message: err.message });
+  
+  // Input validation
+  if (!clientName || !email || !plan) {
+    return res.status(400).json({ message: 'Client name, email, and plan are required' });
   }
-});
+  
+  const result = await pool.query(
+    `INSERT INTO ads (client_name, email, plan, amount, receipt_image, ad_image, ad_content, ad_url, ad_headline, ad_content_file)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+    [clientName, email, plan, amount, receiptImage, adImage, adContent, adUrl, adHeadline, adContentFile]
+  );
+  res.status(201).json(result.rows[0]);
+}));
 
 // 8. Get Active Ads (Public)
 app.get('/api/ads/active', async (req, res) => {
@@ -351,6 +351,20 @@ app.get('/api/admin/support', async (req, res) => {
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
+});
+
+// --- Global Error Handler ---
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(err.status || 500).json({
+    message: err.message || 'Internal Server Error',
+    error: process.env.NODE_ENV === 'development' ? err : {}
+  });
+});
+
+// --- 404 Handler ---
+app.use((req, res) => {
+  res.status(404).json({ message: 'Route not found' });
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
