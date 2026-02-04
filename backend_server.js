@@ -28,12 +28,37 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' })); // Increase limit for large images/files
 
 // PostgreSQL Connection Pool (Supabase)
+const rawDbUrl = process.env.DATABASE_URL || '';
+const connectionString = rawDbUrl ? rawDbUrl.trim() : undefined;
+
+if (!connectionString) {
+  console.warn('Warning: DATABASE_URL is not set or is empty.');
+} else {
+  try {
+    const parsed = new URL(connectionString);
+    console.log(`Connecting to DB host: ${parsed.hostname}`);
+  } catch (e) {
+    // ignore parse errors; do not log sensitive full connection string
+  }
+}
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString,
   ssl: {
     rejectUnauthorized: false // REQUIRED for Supabase connection
   }
 });
+
+// Quick connection test for debugging (temporary)
+(async () => {
+  try {
+    const res = await pool.query('SELECT NOW()');
+    console.log('Database connection test successful. Server time:', res.rows[0].now);
+  } catch (err) {
+    console.error('Database connection test failed:', err && err.message);
+    console.error(err && err.stack);
+  }
+})();
 
 // --- Database Initialization ---
 const initDb = async () => {
@@ -108,7 +133,7 @@ const initDb = async () => {
 
     console.log("PostgreSQL Tables initialized.");
   } catch (err) {
-    console.error("Error creating tables:", err);
+    console.error("Error creating tables:", err && err.stack ? err.stack : err);
   }
 };
 
@@ -355,9 +380,9 @@ app.get('/api/admin/support', async (req, res) => {
 
 // --- Global Error Handler ---
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(err.status || 500).json({
-    message: err.message || 'Internal Server Error',
+  console.error('Error:', err && err.stack ? err.stack : err);
+  res.status(err && err.status ? err.status : 500).json({
+    message: err && err.message ? err.message : 'Internal Server Error',
     error: process.env.NODE_ENV === 'development' ? err : {}
   });
 });
