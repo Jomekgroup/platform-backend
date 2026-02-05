@@ -2,6 +2,7 @@
   "name": "platform-backend",
   "version": "1.0.0",
   "description": "",
+  "type": "commonjs",
   "main": "backend_server.js",
   "scripts": {
     "start": "node backend_server.js",
