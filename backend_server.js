@@ -39,68 +39,34 @@ app.use(express.json({ limit: '50mb' })); // Increase limit for large images/fil
 const rawDbUrl = process.env.DATABASE_URL || '';
 const connectionString = rawDbUrl ? rawDbUrl.trim() : undefined;
 
+let parsedHost, parsedPort, parsedUser, parsedPassword, parsedDatabase;
 if (!connectionString) {
   console.warn('Warning: DATABASE_URL is not set or is empty.');
 } else {
   try {
     const parsed = new URL(connectionString);
-    console.log(`Connecting to DB host: ${parsed.hostname}`);
+    parsedHost = parsed.hostname;
+    parsedPort = parsed.port || 5432;
+    parsedUser = parsed.username;
+    parsedPassword = parsed.password;
+    parsedDatabase = parsed.pathname ? parsed.pathname.replace(/^\//, '') : undefined;
+    console.log(`Connecting to DB host: ${parsedHost}`);
   } catch (e) {
     // ignore parse errors; do not log sensitive full connection string
   }
 }
 
-const dns = require('dns').promises;
+const dns = require('dns');
 
-// Create PG pool. Try resolving DB host to IPv4 to avoid IPv6 ENETUNREACH on some hosts.
+// Create PG pool using the connection string by default. If initial connection
+// fails with ENETUNREACH (IPv6 reachability), attempt an IPv4 DNS lookup and
+// recreate the pool using the resolved IPv4 address.
 let pool;
 if (connectionString) {
-  try {
-    const parsed = new URL(connectionString);
-    const host = parsed.hostname;
-    const port = parsed.port || 5432;
-    const user = parsed.username;
-    const password = parsed.password;
-    const database = parsed.pathname ? parsed.pathname.replace(/^\//, '') : undefined;
-
-    let resolvedHost = host;
-    try {
-      const lookup = await dns.lookup(host, { family: 4 });
-      if (lookup && lookup.address) {
-        resolvedHost = lookup.address;
-        console.log(`Resolved DB host ${host} -> ${resolvedHost} (IPv4)`);
-      }
-    } catch (dnsErr) {
-      console.warn('IPv4 lookup failed for DB host, will try hostname directly:', dnsErr && dnsErr.message);
-    }
-
-    pool = new Pool({
-      host: resolvedHost,
-      port: parseInt(port, 10),
-      user,
-      password,
-      database,
-      ssl: { rejectUnauthorized: false }
-    });
-  } catch (e) {
-    // fallback to connection string if parsing/lookup fails
-    console.warn('Falling back to connectionString for PG Pool:', e && e.message);
-    pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
-  }
+  pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
 } else {
   pool = new Pool({ ssl: { rejectUnauthorized: false } });
 }
-
-// Quick connection test for debugging (temporary)
-(async () => {
-  try {
-    const res = await pool.query('SELECT NOW()');
-    console.log('Database connection test successful. Server time:', res.rows[0].now);
-  } catch (err) {
-    console.error('Database connection test failed:', err && err.message);
-    console.error(err && err.stack);
-  }
-})();
 
 // --- Database Initialization ---
 const initDb = async () => {
@@ -179,7 +145,45 @@ const initDb = async () => {
   }
 };
 
-initDb();
+// Quick connection test for debugging and DB initialization
+(async () => {
+  try {
+    const res = await pool.query('SELECT NOW()');
+    console.log('Database connection test successful. Server time:', res.rows[0].now);
+    await initDb();
+  } catch (err) {
+    console.error('Database connection test failed:', err && err.message);
+    if (err && err.message && err.message.includes('ENETUNREACH') && parsedHost) {
+      console.warn('ENETUNREACH detected; attempting IPv4 lookup for DB host:', parsedHost);
+      dns.lookup(parsedHost, { family: 4 }, async (dnsErr, address) => {
+        if (dnsErr) {
+          console.error('IPv4 lookup failed:', dnsErr && dnsErr.message);
+          console.error(err && err.stack);
+          return;
+        }
+        try {
+          console.log(`Resolved DB host ${parsedHost} -> ${address} (IPv4). Recreating pool.`);
+          await pool.end().catch(() => {});
+          pool = new Pool({
+            host: address,
+            port: parseInt(parsedPort, 10),
+            user: parsedUser,
+            password: parsedPassword,
+            database: parsedDatabase,
+            ssl: { rejectUnauthorized: false }
+          });
+          const res2 = await pool.query('SELECT NOW()');
+          console.log('Database connection test successful via IPv4. Server time:', res2.rows[0].now);
+          await initDb();
+        } catch (err2) {
+          console.error('Database connection retry via IPv4 failed:', err2 && err2.message);
+        }
+      });
+    } else {
+      console.error(err && err.stack);
+    }
+  }
+})();
 
 // --- Error Handling Middleware ---
 const asyncHandler = (fn) => (req, res, next) => {
