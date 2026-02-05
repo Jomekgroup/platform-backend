@@ -50,12 +50,46 @@ if (!connectionString) {
   }
 }
 
-const pool = new Pool({
-  connectionString,
-  ssl: {
-    rejectUnauthorized: false // REQUIRED for Supabase connection
+const dns = require('dns').promises;
+
+// Create PG pool. Try resolving DB host to IPv4 to avoid IPv6 ENETUNREACH on some hosts.
+let pool;
+if (connectionString) {
+  try {
+    const parsed = new URL(connectionString);
+    const host = parsed.hostname;
+    const port = parsed.port || 5432;
+    const user = parsed.username;
+    const password = parsed.password;
+    const database = parsed.pathname ? parsed.pathname.replace(/^\//, '') : undefined;
+
+    let resolvedHost = host;
+    try {
+      const lookup = await dns.lookup(host, { family: 4 });
+      if (lookup && lookup.address) {
+        resolvedHost = lookup.address;
+        console.log(`Resolved DB host ${host} -> ${resolvedHost} (IPv4)`);
+      }
+    } catch (dnsErr) {
+      console.warn('IPv4 lookup failed for DB host, will try hostname directly:', dnsErr && dnsErr.message);
+    }
+
+    pool = new Pool({
+      host: resolvedHost,
+      port: parseInt(port, 10),
+      user,
+      password,
+      database,
+      ssl: { rejectUnauthorized: false }
+    });
+  } catch (e) {
+    // fallback to connection string if parsing/lookup fails
+    console.warn('Falling back to connectionString for PG Pool:', e && e.message);
+    pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
   }
-});
+} else {
+  pool = new Pool({ ssl: { rejectUnauthorized: false } });
+}
 
 // Quick connection test for debugging (temporary)
 (async () => {
