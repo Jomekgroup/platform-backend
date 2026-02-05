@@ -16,13 +16,21 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:5173',
-    'https://*.vercel.app',
-    'https://*.netlify.app'
-  ],
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'http://127.0.0.1:5173',
+      'https://theplatform-lyart.vercel.app',
+      'https://theplatform.vercel.app'
+    ];
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 })); // Allow Frontend to connect securely
 app.use(express.json({ limit: '50mb' })); // Increase limit for large images/files
