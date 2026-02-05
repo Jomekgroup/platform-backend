@@ -135,8 +135,8 @@ const initDb = async () => {
 
     // Migrations for existing tables
     try {
-        await pool.query("ALTER TABLE articles ADD COLUMN IF NOT EXISTS sub_headline TEXT");
-        await pool.query("ALTER TABLE ads ADD COLUMN IF NOT EXISTS ad_content_file TEXT");
+      await pool.query("ALTER TABLE articles ADD COLUMN IF NOT EXISTS sub_headline TEXT");
+      await pool.query("ALTER TABLE ads ADD COLUMN IF NOT EXISTS ad_content_file TEXT");
     } catch (e) { /* ignore */ }
 
     console.log("PostgreSQL Tables initialized.");
@@ -153,17 +153,43 @@ const initDb = async () => {
     await initDb();
   } catch (err) {
     console.error('Database connection test failed:', err && err.message);
+
+    // Check for specific Supabase/Render IPv6 incompatibility
     if (err && err.message && err.message.includes('ENETUNREACH') && parsedHost) {
       console.warn('ENETUNREACH detected; attempting IPv4 lookup for DB host:', parsedHost);
+
       dns.lookup(parsedHost, { family: 4 }, async (dnsErr, address) => {
+        if (dnsErr && dnsErr.code === 'ENOTFOUND') {
+          // This is the critical scenario: IPv6 exists (ENETUNREACH on connect) but IPv4 does not (ENOTFOUND on lookup)
+          console.error('\n\x1b[31m==================================================================================================');
+          console.error('CRITICAL DATABASE CONNECTION ERROR: IPv6/IPv4 Mismatch');
+          console.error('--------------------------------------------------------------------------------------------------');
+          console.error('It appears you are trying to connect to a Supabase Direct URL from an environment (like Render)');
+          console.error('that does not support IPv6.');
+          console.error('');
+          console.error('Current Host:', parsedHost);
+          console.error('');
+          console.error('SOLUTION:');
+          console.error('1. Go to your Supabase Dashboard -> Project Settings -> Database.');
+          console.error('2. Copy the "Transaction Mode" Connection Pooler string (Host usually ends in .pooler.supabase.com).');
+          console.error('3. Update your DATABASE_URL environment variable to use this Pooler connection string.');
+          console.error('   Note: Port is usually 6543 for the pooler.');
+          console.error('==================================================================================================\x1b[0m\n');
+
+          // We cannot recover from this automatically without the correct URL
+          return;
+        }
+
         if (dnsErr) {
-          console.error('IPv4 lookup failed:', dnsErr && dnsErr.message);
+          console.error('IPv4 lookup failed with other error:', dnsErr && dnsErr.message);
           console.error(err && err.stack);
           return;
         }
+
+        // If we found an IPv4 address, try connecting to it directly (fallback logic)
         try {
           console.log(`Resolved DB host ${parsedHost} -> ${address} (IPv4). Recreating pool.`);
-          await pool.end().catch(() => {});
+          await pool.end().catch(() => { });
           pool = new Pool({
             host: address,
             port: parseInt(parsedPort, 10),
@@ -208,12 +234,12 @@ app.get('/api/articles', asyncHandler(async (req, res) => {
 // 2. Submit New Article
 app.post('/api/articles', asyncHandler(async (req, res) => {
   const { title, subHeadline, category, author, image, excerpt, content, status } = req.body;
-  
+
   // Input validation
   if (!title || !category || !content) {
     return res.status(400).json({ message: 'Title, category, and content are required' });
   }
-  
+
   const finalStatus = status || 'pending';
 
   const result = await pool.query(
@@ -234,14 +260,14 @@ app.get('/api/admin/pending-articles', asyncHandler(async (req, res) => {
 app.patch('/api/admin/articles/:id/approve', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { isBreaking } = req.body;
-  
+
   const result = await pool.query(
     `UPDATE articles 
      SET status = 'published', is_breaking = $1, date = NOW() 
      WHERE id = $2 RETURNING *`,
     [isBreaking || false, id]
   );
-  
+
   if (result.rows.length === 0) {
     return res.status(404).json({ message: 'Article not found' });
   }
@@ -252,7 +278,7 @@ app.patch('/api/admin/articles/:id/approve', asyncHandler(async (req, res) => {
 app.put('/api/articles/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { title, subHeadline, category, author, image, content, isBreaking } = req.body;
-  
+
   const result = await pool.query(
     `UPDATE articles 
      SET title = $1, sub_headline = $2, category = $3, author = $4, image = $5, content = $6, is_breaking = $7
@@ -273,12 +299,12 @@ app.delete('/api/articles/:id', asyncHandler(async (req, res) => {
 // 7. Submit Advertisement
 app.post('/api/ads', asyncHandler(async (req, res) => {
   const { clientName, email, plan, amount, receiptImage, adImage, adContent, adUrl, adHeadline, adContentFile } = req.body;
-  
+
   // Input validation
   if (!clientName || !email || !plan) {
     return res.status(400).json({ message: 'Client name, email, and plan are required' });
   }
-  
+
   const result = await pool.query(
     `INSERT INTO ads (client_name, email, plan, amount, receipt_image, ad_image, ad_content, ad_url, ad_headline, ad_content_file)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
@@ -323,7 +349,7 @@ app.get('/api/admin/ads', async (req, res) => {
       email: ad.email,
       plan: ad.plan,
       amount: ad.amount,
-      status: ad.status, 
+      status: ad.status,
       dateSubmitted: ad.date_submitted,
       receiptImage: ad.receipt_image,
       adImage: ad.ad_image,
@@ -347,7 +373,7 @@ app.patch('/api/admin/ads/:id/approve', async (req, res) => {
       [id]
     );
     if (result.rows.length === 0) return res.status(404).json({ message: 'Ad not found' });
-    res.json(result.rows[0]); 
+    res.json(result.rows[0]);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
