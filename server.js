@@ -131,6 +131,16 @@ app.get('/api/ads/active', async (req, res) => {
   }
 });
 
+// 6b. Admin: Get Pending Ads
+app.get('/api/admin/pending-ads', async (req, res) => {
+  try {
+    const ads = await Ad.find({ status: 'pending' });
+    res.json(ads);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // 7. Admin: Approve Ad
 app.patch('/api/admin/ads/:id/approve', async (req, res) => {
   try {
