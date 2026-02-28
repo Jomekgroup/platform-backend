@@ -56,6 +56,21 @@ const commentSchema = new mongoose.Schema({
   date: { type: Date, default: Date.now }
 });
 
+const addTransform = (schema) => {
+  schema.set('toJSON', {
+    virtuals: true,
+    transform: (doc, ret) => {
+      ret.id = ret._id.toString();
+      delete ret._id;
+      delete ret.__v;
+    }
+  });
+};
+
+addTransform(articleSchema);
+addTransform(adSchema);
+addTransform(commentSchema);
+
 const Article = mongoose.model('Article', articleSchema);
 const Ad = mongoose.model('Ad', adSchema);
 const Comment = mongoose.model('Comment', commentSchema);
